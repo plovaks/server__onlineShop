@@ -1,0 +1,152 @@
+const express = require('express');
+const {Pool} = require('pg');
+const cors = require('cors');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(cors());
+app.use(express.json());
+
+const path = require('path');
+app.use('/images', express.static(path.join(__dirname, 'public/images')));
+
+
+const pool = new Pool({
+    user: process.env.DB_USER,
+    host: process.env.DB_HOST,
+    database: process.env.DB_NAME,
+    password: process.env.DB_PASSWORD,
+    port: process.env.DB_PORT || 5432,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
+
+app.get('/', (req, res) => {
+    res.json({ message: 'API работает', status: 'ok' });
+});
+
+// получить все товары 
+app.get('/api/products', async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT 
+                p.*,
+                COALESCE(
+                    (SELECT json_agg(json_build_object(
+                        'url', pi.image_url,
+                        'is_main', pi.is_main,
+                        'sort_order', pi.sort_order
+                    ) ORDER BY pi.sort_order)
+                     FROM product_images pi 
+                     WHERE pi.product_id = p.id),
+                    '[]'::json
+                ) AS images,
+                COALESCE(
+                    (SELECT json_agg(json_build_object(
+                        'name', s.name,
+                        'value', ps.value,
+                        'unit', s.unit
+                    ))
+                     FROM product_specifications ps
+                     JOIN specifications s ON ps.spec_id = s.id
+                     WHERE ps.product_id = p.id),
+                    '[]'::json
+                ) AS specs
+            FROM products p
+            ORDER BY p.id
+        `);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Ошибка при получении товаров:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+//  получить один товар по ID
+app.get('/api/products/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query(`
+            SELECT 
+                p.*,
+                COALESCE(
+                    (SELECT json_agg(json_build_object(
+                        'url', pi.image_url,
+                        'is_main', pi.is_main,
+                        'sort_order', pi.sort_order
+                    ) ORDER BY pi.sort_order)
+                     FROM product_images pi 
+                     WHERE pi.product_id = p.id),
+                    '[]'::json
+                ) AS images,
+                COALESCE(
+                    (SELECT json_agg(json_build_object(
+                        'name', s.name,
+                        'value', ps.value,
+                        'unit', s.unit
+                    ))
+                     FROM product_specifications ps
+                     JOIN specifications s ON ps.spec_id = s.id
+                     WHERE ps.product_id = p.id),
+                    '[]'::json
+                ) AS specs
+            FROM products p
+            WHERE p.id = $1
+        `, [id]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Товар не найден' });
+        }
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('Ошибка при получении товара:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// получить все категории
+app.get('/api/categories', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM categories ORDER BY id');
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Ошибка при получении категорий:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// получить товары по категории
+app.get('/api/categories/:id/products', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query(`
+            SELECT p.*,
+                   COALESCE(
+                       (SELECT json_agg(json_build_object(
+                           'url', pi.image_url,
+                           'is_main', pi.is_main,
+                           'sort_order', pi.sort_order
+                       ) ORDER BY pi.sort_order)
+                        FROM product_images pi 
+                        WHERE pi.product_id = p.id),
+                       '[]'::json
+                   ) AS images
+            FROM products p
+            WHERE p.category_id = $1
+            ORDER BY p.id
+        `, [id]);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Ошибка при получении товаров по категории:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+
+
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Сервер запущен на порту ${PORT}`);
+    console.log(`Проверь: https://localhost:${PORT}/api/products`);
+});
+
