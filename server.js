@@ -29,7 +29,7 @@ pool.connect((err, client, release) => {
     }
 });
 
-// проверка JWT 
+// проверка JWT
 function authMiddleware(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -44,18 +44,14 @@ function authMiddleware(req, res, next) {
     }
 }
 
-
 app.get('/', (req, res) => {
     res.json({ message: 'API работает', status: 'ok' });
 });
 
+// авторизация
 
-
-// Регистрация
 app.post('/api/auth/register', async (req, res) => {
     const { full_name, email, password } = req.body;
-
-    // Валидация
     if (!full_name || !email || !password) {
         return res.status(400).json({ error: 'Заполните все поля' });
     }
@@ -65,7 +61,6 @@ app.post('/api/auth/register', async (req, res) => {
     if (!email.includes('@')) {
         return res.status(400).json({ error: 'Некорректный email' });
     }
-
     try {
         const hash = await bcrypt.hash(password, 10);
         const result = await pool.query(
@@ -90,30 +85,23 @@ app.post('/api/auth/register', async (req, res) => {
     }
 });
 
-// Вход
 app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
-
     if (!email || !password) {
         return res.status(400).json({ error: 'Заполните все поля' });
     }
-
     try {
         const result = await pool.query(
-            'SELECT * FROM customers WHERE email = $1',
-            [email]
+            'SELECT * FROM customers WHERE email = $1', [email]
         );
         const customer = result.rows[0];
-
         if (!customer) {
             return res.status(401).json({ error: 'Неверный email или пароль' });
         }
-
         const valid = await bcrypt.compare(password, customer.password);
         if (!valid) {
             return res.status(401).json({ error: 'Неверный email или пароль' });
         }
-
         const token = jwt.sign(
             { id: customer.id, email: customer.email },
             JWT_SECRET,
@@ -134,9 +122,8 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
+// профиль
 
-
-// Получить данные профиля
 app.get('/api/customer/me', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query(
@@ -153,7 +140,6 @@ app.get('/api/customer/me', authMiddleware, async (req, res) => {
     }
 });
 
-// Обновить имя
 app.patch('/api/customer/me', authMiddleware, async (req, res) => {
     const { full_name } = req.body;
     if (!full_name || !full_name.trim()) {
@@ -171,53 +157,80 @@ app.patch('/api/customer/me', authMiddleware, async (req, res) => {
     }
 });
 
-// Получить заказы пользователя
+// заказы
+
+// заказы пользователя с товарами внутри
 app.get('/api/customer/orders', authMiddleware, async (req, res) => {
     try {
-        const result = await pool.query(
-            `SELECT * FROM orders
-             WHERE customer_id = $1
-             ORDER BY order_date DESC`,
+        const ordersResult = await pool.query(
+            `SELECT * FROM orders WHERE customer_id = $1 ORDER BY order_date DESC`,
             [req.user.id]
         );
-        res.json(result.rows);
+        const orders = await Promise.all(ordersResult.rows.map(async (order) => {
+            const itemsResult = await pool.query(
+                `SELECT * FROM order_items WHERE order_id = $1`,
+                [order.id]
+            );
+            return { ...order, items: itemsResult.rows };
+        }));
+        res.json(orders);
     } catch (err) {
         console.error('Ошибка получения заказов:', err);
         res.status(500).json({ error: 'Ошибка сервера' });
     }
 });
 
+// Создать заказ
+app.post('/api/orders', authMiddleware, async (req, res) => {
+    const { items, total_amount } = req.body;
 
+    if (!items || items.length === 0) {
+        return res.status(400).json({ error: 'Корзина пуста' });
+    }
 
-// Получить все товары
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const orderResult = await client.query(
+            `INSERT INTO orders (customer_id, total_amount, status)
+             VALUES ($1, $2, 'pending') RETURNING *`,
+            [req.user.id, total_amount]
+        );
+        const order = orderResult.rows[0];
+
+        for (const item of items) {
+            await client.query(
+                `INSERT INTO order_items (order_id, product_id, name, quantity, price)
+                 VALUES ($1, $2, $3, $4, $5)`,
+                [order.id, item.product_id, item.name, item.quantity, item.price]
+            );
+        }
+
+        await client.query('COMMIT');
+        res.status(201).json({ order });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Ошибка создания заказа:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    } finally {
+        client.release();
+    }
+});
+
+// товары
+
 app.get('/api/products', async (req, res) => {
     try {
         const result = await pool.query(`
-            SELECT 
-                p.*,
-                COALESCE(
-                    (SELECT json_agg(json_build_object(
-                        'url', pi.image_url,
-                        'is_main', pi.is_main,
-                        'sort_order', pi.sort_order
-                    ) ORDER BY pi.sort_order)
-                     FROM product_images pi 
-                     WHERE pi.product_id = p.id),
-                    '[]'::json
-                ) AS images,
-                COALESCE(
-                    (SELECT json_agg(json_build_object(
-                        'name', s.name,
-                        'value', ps.value,
-                        'unit', s.unit
-                    ))
-                     FROM product_specifications ps
-                     JOIN specifications s ON ps.spec_id = s.id
-                     WHERE ps.product_id = p.id),
-                    '[]'::json
-                ) AS specs
-            FROM products p
-            ORDER BY p.id
+            SELECT p.*,
+                COALESCE((SELECT json_agg(json_build_object(
+                    'url', pi.image_url,'is_main', pi.is_main,'sort_order', pi.sort_order
+                ) ORDER BY pi.sort_order) FROM product_images pi WHERE pi.product_id = p.id),'[]'::json) AS images,
+                COALESCE((SELECT json_agg(json_build_object(
+                    'name', s.name,'value', ps.value,'unit', s.unit
+                )) FROM product_specifications ps JOIN specifications s ON ps.spec_id = s.id WHERE ps.product_id = p.id),'[]'::json) AS specs
+            FROM products p ORDER BY p.id
         `);
         res.json(result.rows);
     } catch (err) {
@@ -226,38 +239,19 @@ app.get('/api/products', async (req, res) => {
     }
 });
 
-// Получить один товар по ID
 app.get('/api/products/:id', async (req, res) => {
     const { id } = req.params;
     try {
         const result = await pool.query(`
-            SELECT 
-                p.*,
-                COALESCE(
-                    (SELECT json_agg(json_build_object(
-                        'url', pi.image_url,
-                        'is_main', pi.is_main,
-                        'sort_order', pi.sort_order
-                    ) ORDER BY pi.sort_order)
-                     FROM product_images pi 
-                     WHERE pi.product_id = p.id),
-                    '[]'::json
-                ) AS images,
-                COALESCE(
-                    (SELECT json_agg(json_build_object(
-                        'name', s.name,
-                        'value', ps.value,
-                        'unit', s.unit
-                    ))
-                     FROM product_specifications ps
-                     JOIN specifications s ON ps.spec_id = s.id
-                     WHERE ps.product_id = p.id),
-                    '[]'::json
-                ) AS specs
-            FROM products p
-            WHERE p.id = $1
+            SELECT p.*,
+                COALESCE((SELECT json_agg(json_build_object(
+                    'url', pi.image_url,'is_main', pi.is_main,'sort_order', pi.sort_order
+                ) ORDER BY pi.sort_order) FROM product_images pi WHERE pi.product_id = p.id),'[]'::json) AS images,
+                COALESCE((SELECT json_agg(json_build_object(
+                    'name', s.name,'value', ps.value,'unit', s.unit
+                )) FROM product_specifications ps JOIN specifications s ON ps.spec_id = s.id WHERE ps.product_id = p.id),'[]'::json) AS specs
+            FROM products p WHERE p.id = $1
         `, [id]);
-
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Товар не найден' });
         }
@@ -268,9 +262,8 @@ app.get('/api/products/:id', async (req, res) => {
     }
 });
 
+// категории
 
-
-// Получить все категории
 app.get('/api/categories', async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM categories ORDER BY id');
@@ -281,25 +274,15 @@ app.get('/api/categories', async (req, res) => {
     }
 });
 
-// Получить товары по категории
 app.get('/api/categories/:id/products', async (req, res) => {
     const { id } = req.params;
     try {
         const result = await pool.query(`
             SELECT p.*,
-                   COALESCE(
-                       (SELECT json_agg(json_build_object(
-                           'url', pi.image_url,
-                           'is_main', pi.is_main,
-                           'sort_order', pi.sort_order
-                       ) ORDER BY pi.sort_order)
-                        FROM product_images pi 
-                        WHERE pi.product_id = p.id),
-                       '[]'::json
-                   ) AS images
-            FROM products p
-            WHERE p.category_id = $1
-            ORDER BY p.id
+                COALESCE((SELECT json_agg(json_build_object(
+                    'url', pi.image_url,'is_main', pi.is_main,'sort_order', pi.sort_order
+                ) ORDER BY pi.sort_order) FROM product_images pi WHERE pi.product_id = p.id),'[]'::json) AS images
+            FROM products p WHERE p.category_id = $1 ORDER BY p.id
         `, [id]);
         res.json(result.rows);
     } catch (err) {
