@@ -10,12 +10,13 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'refreshsecret';
 
 app.use(cors());
 app.use(express.json());
 app.use('/images', express.static(path.join(__dirname, 'public/images')));
 
-// База данных 
+// база данных
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
@@ -30,7 +31,7 @@ pool.connect((err, client, release) => {
     }
 });
 
-// Почта 
+// почта
 const transporter = nodemailer.createTransport({
     host: 'smtp.yandex.ru',
     port: 465,
@@ -41,7 +42,7 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-// проверка JWT 
+//  проверка JWT 
 function authMiddleware(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -60,7 +61,7 @@ app.get('/', (req, res) => {
     res.json({ message: 'API работает', status: 'ok' });
 });
 
-//авторизация
+// авторизация
 
 app.post('/api/auth/register', async (req, res) => {
     const { full_name, email, password } = req.body;
@@ -85,9 +86,14 @@ app.post('/api/auth/register', async (req, res) => {
         const token = jwt.sign(
             { id: customer.id, email: customer.email },
             JWT_SECRET,
-            { expiresIn: '7d' }
+            { expiresIn: '15m' }
         );
-        res.status(201).json({ token, customer });
+        const refreshToken = jwt.sign(
+            { id: customer.id, email: customer.email },
+            JWT_REFRESH_SECRET,
+            { expiresIn: '30d' }
+        );
+        res.status(201).json({ token, refreshToken, customer });
     } catch (err) {
         if (err.code === '23505') {
             return res.status(409).json({ error: 'Этот email уже зарегистрирован' });
@@ -117,10 +123,16 @@ app.post('/api/auth/login', async (req, res) => {
         const token = jwt.sign(
             { id: customer.id, email: customer.email },
             JWT_SECRET,
-            { expiresIn: '7d' }
+            { expiresIn: '15m' }
+        );
+        const refreshToken = jwt.sign(
+            { id: customer.id, email: customer.email },
+            JWT_REFRESH_SECRET,
+            { expiresIn: '30d' }
         );
         res.json({
             token,
+            refreshToken,
             customer: {
                 id: customer.id,
                 full_name: customer.full_name,
@@ -131,6 +143,25 @@ app.post('/api/auth/login', async (req, res) => {
     } catch (err) {
         console.error('Ошибка входа:', err);
         res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// Обновить access token через refresh token
+app.post('/api/auth/refresh', async (req, res) => {
+    const { refreshToken } = req.body;
+    if (!refreshToken) {
+        return res.status(401).json({ error: 'Нет refresh токена' });
+    }
+    try {
+        const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
+        const newToken = jwt.sign(
+            { id: decoded.id, email: decoded.email },
+            JWT_SECRET,
+            { expiresIn: '15m' }
+        );
+        res.json({ token: newToken });
+    } catch {
+        res.status(401).json({ error: 'Refresh токен недействителен' });
     }
 });
 
@@ -191,7 +222,6 @@ app.get('/api/customer/orders', authMiddleware, async (req, res) => {
     }
 });
 
-// Создать заказ + отправить письмо
 app.post('/api/orders', authMiddleware, async (req, res) => {
     const { items, total_amount } = req.body;
 
@@ -220,7 +250,6 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
 
         await client.query('COMMIT');
 
-        // Отправить письмо пользователю
         const itemsList = items.map(item =>
             `• ${item.name} — ${item.quantity} шт. × ${item.price} ₽ = ${item.quantity * item.price} ₽`
         ).join('\n');
@@ -247,7 +276,6 @@ ${itemsList}
 Спасибо что выбрали Power Store!`
             });
         } catch (mailErr) {
-           
             console.error('Ошибка отправки письма:', mailErr);
         }
 
@@ -262,7 +290,7 @@ ${itemsList}
     }
 });
 
-// товары
+//товары
 
 app.get('/api/products', async (req, res) => {
     try {
@@ -306,7 +334,7 @@ app.get('/api/products/:id', async (req, res) => {
     }
 });
 
-//категории
+
 
 app.get('/api/categories', async (req, res) => {
     try {
