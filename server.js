@@ -3,6 +3,7 @@ const { Pool } = require('pg');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
 require('dotenv').config();
 const path = require('path');
 
@@ -29,7 +30,18 @@ pool.connect((err, client, release) => {
     }
 });
 
-// проверка JWT
+// Почта 
+const transporter = nodemailer.createTransport({
+    host: 'smtp.yandex.ru',
+    port: 465,
+    secure: true,
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    }
+});
+
+// проверка JWT 
 function authMiddleware(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -48,7 +60,7 @@ app.get('/', (req, res) => {
     res.json({ message: 'API работает', status: 'ok' });
 });
 
-// авторизация
+//авторизация
 
 app.post('/api/auth/register', async (req, res) => {
     const { full_name, email, password } = req.body;
@@ -159,7 +171,6 @@ app.patch('/api/customer/me', authMiddleware, async (req, res) => {
 
 // заказы
 
-// заказы пользователя с товарами внутри
 app.get('/api/customer/orders', authMiddleware, async (req, res) => {
     try {
         const ordersResult = await pool.query(
@@ -180,7 +191,7 @@ app.get('/api/customer/orders', authMiddleware, async (req, res) => {
     }
 });
 
-// Создать заказ
+// Создать заказ + отправить письмо
 app.post('/api/orders', authMiddleware, async (req, res) => {
     const { items, total_amount } = req.body;
 
@@ -208,7 +219,40 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
         }
 
         await client.query('COMMIT');
+
+        // Отправить письмо пользователю
+        const itemsList = items.map(item =>
+            `• ${item.name} — ${item.quantity} шт. × ${item.price} ₽ = ${item.quantity * item.price} ₽`
+        ).join('\n');
+
+        try {
+            await transporter.sendMail({
+                from: `"Power Store" <${process.env.EMAIL_USER}>`,
+                to: req.user.email,
+                subject: `Заказ №${order.id} оформлен — Power Store`,
+                text: `Здравствуйте!
+
+Ваш заказ №${order.id} успешно оформлен.
+
+Состав заказа:
+${itemsList}
+
+Итого: ${total_amount} ₽
+
+С вами свяжутся для подтверждения заказа и уточнения деталей доставки.
+
+По всем вопросам вы можете написать нам:
+📧 ${process.env.EMAIL_USER}
+
+Спасибо что выбрали Power Store!`
+            });
+        } catch (mailErr) {
+           
+            console.error('Ошибка отправки письма:', mailErr);
+        }
+
         res.status(201).json({ order });
+
     } catch (err) {
         await client.query('ROLLBACK');
         console.error('Ошибка создания заказа:', err);
@@ -262,7 +306,7 @@ app.get('/api/products/:id', async (req, res) => {
     }
 });
 
-// категории
+//категории
 
 app.get('/api/categories', async (req, res) => {
     try {
