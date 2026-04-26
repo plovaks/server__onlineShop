@@ -1,24 +1,25 @@
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
 const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
+const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
 
 app.use(cors());
 app.use(express.json());
 app.use('/images', express.static(path.join(__dirname, 'public/images')));
 
-// Настройка базы данных
+// База данных 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
-// Проверка подключения к БД
 pool.connect((err, client, release) => {
     if (err) {
         console.error('Ошибка подключения к базе данных:', err.stack);
@@ -28,12 +29,167 @@ pool.connect((err, client, release) => {
     }
 });
 
-// Корневой маршрут
+// проверка JWT 
+function authMiddleware(req, res, next) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Не авторизован' });
+    }
+    const token = authHeader.split(' ')[1];
+    try {
+        req.user = jwt.verify(token, JWT_SECRET);
+        next();
+    } catch {
+        res.status(401).json({ error: 'Недействительный токен' });
+    }
+}
+
+
 app.get('/', (req, res) => {
     res.json({ message: 'API работает', status: 'ok' });
 });
 
-// Получить все товары 
+
+
+// Регистрация
+app.post('/api/auth/register', async (req, res) => {
+    const { full_name, email, password } = req.body;
+
+    // Валидация
+    if (!full_name || !email || !password) {
+        return res.status(400).json({ error: 'Заполните все поля' });
+    }
+    if (password.length < 6) {
+        return res.status(400).json({ error: 'Пароль минимум 6 символов' });
+    }
+    if (!email.includes('@')) {
+        return res.status(400).json({ error: 'Некорректный email' });
+    }
+
+    try {
+        const hash = await bcrypt.hash(password, 10);
+        const result = await pool.query(
+            `INSERT INTO customers (full_name, email, password)
+             VALUES ($1, $2, $3)
+             RETURNING id, full_name, email, created_at`,
+            [full_name, email, hash]
+        );
+        const customer = result.rows[0];
+        const token = jwt.sign(
+            { id: customer.id, email: customer.email },
+            JWT_SECRET,
+            { expiresIn: '7d' }
+        );
+        res.status(201).json({ token, customer });
+    } catch (err) {
+        if (err.code === '23505') {
+            return res.status(409).json({ error: 'Этот email уже зарегистрирован' });
+        }
+        console.error('Ошибка регистрации:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// Вход
+app.post('/api/auth/login', async (req, res) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+        return res.status(400).json({ error: 'Заполните все поля' });
+    }
+
+    try {
+        const result = await pool.query(
+            'SELECT * FROM customers WHERE email = $1',
+            [email]
+        );
+        const customer = result.rows[0];
+
+        if (!customer) {
+            return res.status(401).json({ error: 'Неверный email или пароль' });
+        }
+
+        const valid = await bcrypt.compare(password, customer.password);
+        if (!valid) {
+            return res.status(401).json({ error: 'Неверный email или пароль' });
+        }
+
+        const token = jwt.sign(
+            { id: customer.id, email: customer.email },
+            JWT_SECRET,
+            { expiresIn: '7d' }
+        );
+        res.json({
+            token,
+            customer: {
+                id: customer.id,
+                full_name: customer.full_name,
+                email: customer.email,
+                created_at: customer.created_at
+            }
+        });
+    } catch (err) {
+        console.error('Ошибка входа:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+
+
+// Получить данные профиля
+app.get('/api/customer/me', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT id, full_name, email, created_at FROM customers WHERE id = $1',
+            [req.user.id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('Ошибка получения профиля:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// Обновить имя
+app.patch('/api/customer/me', authMiddleware, async (req, res) => {
+    const { full_name } = req.body;
+    if (!full_name || !full_name.trim()) {
+        return res.status(400).json({ error: 'Имя не может быть пустым' });
+    }
+    try {
+        const result = await pool.query(
+            'UPDATE customers SET full_name = $1 WHERE id = $2 RETURNING id, full_name, email, created_at',
+            [full_name.trim(), req.user.id]
+        );
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('Ошибка обновления профиля:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// Получить заказы пользователя
+app.get('/api/customer/orders', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT * FROM orders
+             WHERE customer_id = $1
+             ORDER BY order_date DESC`,
+            [req.user.id]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Ошибка получения заказов:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+
+
+// Получить все товары
 app.get('/api/products', async (req, res) => {
     try {
         const result = await pool.query(`
@@ -101,7 +257,7 @@ app.get('/api/products/:id', async (req, res) => {
             FROM products p
             WHERE p.id = $1
         `, [id]);
-        
+
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Товар не найден' });
         }
@@ -111,6 +267,8 @@ app.get('/api/products/:id', async (req, res) => {
         res.status(500).json({ error: 'Ошибка сервера' });
     }
 });
+
+
 
 // Получить все категории
 app.get('/api/categories', async (req, res) => {
@@ -152,7 +310,7 @@ app.get('/api/categories/:id/products', async (req, res) => {
 
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(` Сервер запущен на http://localhost:${PORT}`);
+    console.log(`Сервер запущен на http://localhost:${PORT}`);
     console.log(`Проверь: http://localhost:${PORT}/api/products`);
-    console.log(` Статус: http://localhost:${PORT}/`);
+    console.log(`Статус: http://localhost:${PORT}/`);
 });
