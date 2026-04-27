@@ -255,6 +255,7 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
         ).join('\n');
 
         try {
+            console.log('Отправляем письмо на:', req.user.email);
             await transporter.sendMail({
                 from: `"Power Store" <${process.env.EMAIL_USER}>`,
                 to: req.user.email,
@@ -271,7 +272,7 @@ ${itemsList}
 С вами свяжутся для подтверждения заказа и уточнения деталей доставки.
 
 По всем вопросам вы можете написать нам:
-📧 ${process.env.EMAIL_USER}
+${process.env.EMAIL_USER}
 
 Спасибо что выбрали Power Store!`
             });
