@@ -16,6 +16,123 @@ app.use(cors());
 app.use(express.json());
 app.use('/images', express.static(path.join(__dirname, 'public/images')));
 
+
+
+// ─── ТЕСТОВЫЙ ЭНДПОИНТ ДЛЯ ПРОВЕРКИ КОНФИГУРАЦИИ ─────────────────────────────
+app.get('/api/debug/config', (req, res) => {
+    res.json({
+        node_env: process.env.NODE_ENV || 'not set',
+        email_user_set: !!process.env.EMAIL_USER,
+        email_user_length: process.env.EMAIL_USER?.length || 0,
+        email_pass_set: !!process.env.EMAIL_PASS,
+        email_pass_length: process.env.EMAIL_PASS?.length || 0,
+        database_url_set: !!process.env.DATABASE_URL,
+        port: PORT,
+        env_vars: Object.keys(process.env).filter(k => !k.includes('PASS') && !k.includes('SECRET'))
+    });
+});
+
+// ─── ТЕСТОВЫЙ ЭНДПОИНТ ДЛЯ ПРОВЕРКИ ПОЧТЫ ────────────────────────────────────
+app.post('/api/debug/test-email', async (req, res) => {
+    const { email } = req.body;
+    
+    console.log('\n🔍 === ДИАГНОСТИКА ПОЧТЫ ===');
+    console.log('1. EMAIL_USER из .env:', process.env.EMAIL_USER ? '✅ ЗАДАН' : ' НЕ ЗАДАН');
+    console.log('2. EMAIL_PASS из .env:', process.env.EMAIL_PASS ? '✅ ЗАДАН' : ' НЕ ЗАДАН');
+    console.log('3. Адрес получателя:', email || ' НЕ УКАЗАН');
+    
+    if (!email) {
+        return res.status(400).json({ error: 'Укажите email в поле "email"' });
+    }
+    
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+        console.error(' Ошибка: EMAIL_USER или EMAIL_PASS не заданы в .env!');
+        return res.status(500).json({ 
+            error: 'Почта не настроена: EMAIL_USER или EMAIL_PASS отсутствуют',
+            details: {
+                email_user: !!process.env.EMAIL_USER,
+                email_pass: !!process.env.EMAIL_PASS
+            }
+        });
+    }
+    
+    try {
+        console.log('4. Попытка подключения к SMTP...');
+        
+        const info = await transporter.sendMail({
+            from: `"Power Store Battery Shop" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: 'Тестовое письмо от Power Store',
+            text: `Здравствуйте!
+
+Это тестовое письмо от вашего интернет-магазина Power Store.
+
+Если вы получили это письмо — почта настроена правильно и работает!
+
+Сообщение отправлено: ${new Date().toLocaleString()}
+
+Спасибо что выбрали Power Store!`,
+            html: `
+                <div style="font-family: Arial, sans-serif; padding: 20px;">
+                    <h2 style="color: #F0D300;">Power Store</h2>
+                    <p>Здравствуйте!</p>
+                    <p>Это <b>тестовое письмо</b> от вашего интернет-магазина аккумуляторов.</p>
+                    <p> Если вы получили это письмо — <b style="color: green;">почта настроена правильно и работает!</b></p>
+                    <hr>
+                    <p style="color: #666; font-size: 12px;">Сообщение отправлено: ${new Date().toLocaleString()}</p>
+                </div>
+            `
+        });
+        
+        console.log('5.  Письмо УСПЕШНО отправлено!');
+        console.log('6. Message ID:', info.messageId);
+        console.log('7. Ответ сервера:', info.response);
+        
+        res.json({
+            success: true,
+            messageId: info.messageId,
+            response: info.response,
+            to: email,
+            from: process.env.EMAIL_USER,
+            sentAt: new Date().toISOString()
+        });
+        
+    } catch (err) {
+        console.error(' ОШИБКА ПРИ ОТПРАВКЕ ПИСЬМА:');
+        console.error('Код ошибки:', err.code);
+        console.error('Сообщение:', err.message);
+        console.error('Полный стек:', err);
+        
+        res.status(500).json({
+            success: false,
+            error: err.message,
+            code: err.code,
+            details: {
+                email_user: process.env.EMAIL_USER,
+                email_pass_length: process.env.EMAIL_PASS?.length || 0
+            }
+        });
+    }
+});
+
+// ─── ТЕСТОВЫЙ ЭНДПОИНТ ДЛЯ ПРОВЕРКИ ПОДКЛЮЧЕНИЯ К БД ──────────────────────────
+app.get('/api/debug/database', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT NOW() as time, version() as pg_version');
+        res.json({
+            connected: true,
+            timestamp: result.rows[0].time,
+            postgres_version: result.rows[0].pg_version
+        });
+    } catch (err) {
+        console.error('Ошибка БД:', err);
+        res.status(500).json({
+            connected: false,
+            error: err.message
+        });
+    }
+});
+
 // ─── База данных ───────────────────────────────────────────────────────────────
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
