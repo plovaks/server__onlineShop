@@ -31,22 +31,25 @@ pool.connect((err, client, release) => {
     }
 });
 
-// ─── Почта Gmail ──────────────────────────────────────────────────────────────
+// ─── Почта (Gmail SMTP с паролем приложения) ───────────────────────────────────
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
+    port: 465,
+    secure: true,
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
-    }
+    },
+    family: 4  // принудительно IPv4
 });
 
-transporter.verify((error) => {
+// Проверка подключения к почте
+transporter.verify((error, success) => {
     if (error) {
-        console.error('Ошибка настройки почты:', error.message);
+        console.error('Ошибка настройки почты:', error);
     } else {
-        console.log('Почта готова к отправке:', process.env.EMAIL_USER);
+        console.log('Почтовый сервер Gmail готов к отправке');
+        console.log('Отправитель:', process.env.EMAIL_USER);
     }
 });
 
@@ -229,7 +232,6 @@ app.get('/api/customer/orders', authMiddleware, async (req, res) => {
     }
 });
 
-// Создать заказ + отправить письмо
 app.post('/api/orders', authMiddleware, async (req, res) => {
     const { items, total_amount } = req.body;
 
@@ -241,7 +243,6 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        // Создаём заказ
         const orderResult = await client.query(
             `INSERT INTO orders (customer_id, total_amount, status)
              VALUES ($1, $2, 'pending') RETURNING *`,
@@ -249,7 +250,6 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
         );
         const order = orderResult.rows[0];
 
-        // Добавляем товары заказа
         for (const item of items) {
             await client.query(
                 `INSERT INTO order_items (order_id, product_id, name, quantity, price)
@@ -260,11 +260,12 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
 
         await client.query('COMMIT');
 
-        // Отправляем письмо
+        // Формируем список товаров для письма
         const itemsList = items.map(item =>
             `• ${item.name} — ${item.quantity} шт. × ${item.price} ₽ = ${item.quantity * item.price} ₽`
         ).join('\n');
 
+        // Отправляем письмо через Gmail SMTP
         console.log('Отправляем письмо на:', req.user.email);
         try {
             await transporter.sendMail({
@@ -282,11 +283,9 @@ ${itemsList}
 
 С вами свяжутся для подтверждения заказа и уточнения деталей доставки.
 
-По всем вопросам: ${process.env.EMAIL_USER}
-
 Спасибо что выбрали Power Store!`
             });
-            console.log('Письмо отправлено успешно!');
+            console.log('Письмо отправлено!');
         } catch (mailErr) {
             console.error('Ошибка отправки письма:', mailErr.message);
         }

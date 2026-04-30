@@ -1,0 +1,13 @@
+meta:
+  environment: node
+  toolchain:
+    name: npm
+    version: 18
+
+build:
+  additionalCommands: echo "Зависимости установлены"
+
+run:
+  scriptName: server.js
+  persistenceMount: /data
+  containerPort: 3000
