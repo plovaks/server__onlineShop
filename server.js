@@ -16,6 +16,14 @@ app.use(cors());
 app.use(express.json());
 app.use('/images', express.static(path.join(__dirname, 'public/images')));
 
+// Логирование всех входящих запросов
+app.use((req, res, next) => {
+    console.log(` [${new Date().toISOString()}] ${req.method} ${req.url}`);
+    if (req.body && Object.keys(req.body).length > 0) {
+        console.log(` Body:`, JSON.stringify(req.body, null, 2));
+    }
+    next();
+});
 
 
 // ─── ТЕСТОВЫЙ ЭНДПОИНТ ДЛЯ ПРОВЕРКИ КОНФИГУРАЦИИ ─────────────────────────────
