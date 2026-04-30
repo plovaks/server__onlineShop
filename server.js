@@ -16,7 +16,7 @@ app.use(cors());
 app.use(express.json());
 app.use('/images', express.static(path.join(__dirname, 'public/images')));
 
-// база данных
+// ─── База данных ───────────────────────────────────────────────────────────────
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
@@ -24,36 +24,33 @@ const pool = new Pool({
 
 pool.connect((err, client, release) => {
     if (err) {
-        console.error(' Ошибка подключения к базе данных:', err.stack);
+        console.error('Ошибка подключения к базе данных:', err.stack);
     } else {
-        console.log(' Подключено к PostgreSQL');
+        console.log('Подключено к PostgreSQL');
         release();
     }
 });
 
-
+// ─── Почта Gmail ──────────────────────────────────────────────────────────────
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
     auth: {
-        type: 'OAuth2',
-        user: process.env.GOOGLE_USER,          
-        clientId: process.env.GOOGLE_CLIENT_ID,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        refreshToken: process.env.GOOGLE_REFRESH_TOKEN
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
     }
 });
 
-// Проверка подключения к почте при старте сервера
-transporter.verify((error, success) => {
+transporter.verify((error) => {
     if (error) {
-        console.error('Ошибка настройки Gmail OAuth2:', error);
+        console.error('Ошибка настройки почты:', error.message);
     } else {
-        console.log('Почтовый сервер Gmail готов к отправке (OAuth2)');
-        console.log(`Отправитель: ${process.env.GOOGLE_USER}`);
+        console.log('Почта готова к отправке:', process.env.EMAIL_USER);
     }
 });
 
-
+// ─── Middleware: проверка JWT ──────────────────────────────────────────────────
 function authMiddleware(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -68,12 +65,12 @@ function authMiddleware(req, res, next) {
     }
 }
 
-// публичные маршруты
 app.get('/', (req, res) => {
     res.json({ message: 'API работает', status: 'ok' });
 });
 
-// Регистрация
+// ─── АВТОРИЗАЦИЯ ──────────────────────────────────────────────────────────────
+
 app.post('/api/auth/register', async (req, res) => {
     const { full_name, email, password } = req.body;
     if (!full_name || !email || !password) {
@@ -114,7 +111,6 @@ app.post('/api/auth/register', async (req, res) => {
     }
 });
 
-// Вход
 app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -158,7 +154,6 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// Обновление access токена
 app.post('/api/auth/refresh', async (req, res) => {
     const { refreshToken } = req.body;
     if (!refreshToken) {
@@ -177,7 +172,8 @@ app.post('/api/auth/refresh', async (req, res) => {
     }
 });
 
-// профиль
+// ─── ПРОФИЛЬ ──────────────────────────────────────────────────────────────────
+
 app.get('/api/customer/me', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query(
@@ -211,7 +207,8 @@ app.patch('/api/customer/me', authMiddleware, async (req, res) => {
     }
 });
 
-// заказы
+// ─── ЗАКАЗЫ ───────────────────────────────────────────────────────────────────
+
 app.get('/api/customer/orders', authMiddleware, async (req, res) => {
     try {
         const ordersResult = await pool.query(
@@ -232,6 +229,7 @@ app.get('/api/customer/orders', authMiddleware, async (req, res) => {
     }
 });
 
+// Создать заказ + отправить письмо
 app.post('/api/orders', authMiddleware, async (req, res) => {
     const { items, total_amount } = req.body;
 
@@ -243,6 +241,7 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
     try {
         await client.query('BEGIN');
 
+        // Создаём заказ
         const orderResult = await client.query(
             `INSERT INTO orders (customer_id, total_amount, status)
              VALUES ($1, $2, 'pending') RETURNING *`,
@@ -250,6 +249,7 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
         );
         const order = orderResult.rows[0];
 
+        // Добавляем товары заказа
         for (const item of items) {
             await client.query(
                 `INSERT INTO order_items (order_id, product_id, name, quantity, price)
@@ -260,23 +260,35 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
 
         await client.query('COMMIT');
 
+        // Отправляем письмо
         const itemsList = items.map(item =>
             `• ${item.name} — ${item.quantity} шт. × ${item.price} ₽ = ${item.quantity * item.price} ₽`
         ).join('\n');
 
-        // Отправка письма через Gmail OAuth2
+        console.log('Отправляем письмо на:', req.user.email);
         try {
-            console.log(` Отправляем письмо на: ${req.user.email}`);
-            const info = await transporter.sendMail({
-                from: `"Power Store" <${process.env.GOOGLE_USER}>`,
+            await transporter.sendMail({
+                from: `"Power Store" <${process.env.EMAIL_USER}>`,
                 to: req.user.email,
                 subject: `Заказ №${order.id} оформлен — Power Store`,
-                text: `Здравствуйте!\n\nВаш заказ №${order.id} успешно оформлен.\n\nСостав заказа:\n${itemsList}\n\nИтого: ${total_amount} рублей\n\nС вами свяжутся для подтверждения заказа и уточнения деталей доставки.\n\nПо всем вопросам вы можете написать нам:\n${process.env.GOOGLE_USER}\n\nСпасибо что выбрали Power Store!`,
-                
+                text: `Здравствуйте!
+
+Ваш заказ №${order.id} успешно оформлен.
+
+Состав заказа:
+${itemsList}
+
+Итого: ${total_amount} ₽
+
+С вами свяжутся для подтверждения заказа и уточнения деталей доставки.
+
+По всем вопросам: ${process.env.EMAIL_USER}
+
+Спасибо что выбрали Power Store!`
             });
-            console.log(` Письмо отправлено! Message ID: ${info.messageId}`);
+            console.log('Письмо отправлено успешно!');
         } catch (mailErr) {
-            console.error('Ошибка отправки письма:', mailErr);
+            console.error('Ошибка отправки письма:', mailErr.message);
         }
 
         res.status(201).json({ order });
@@ -290,6 +302,7 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
     }
 });
 
+// ─── ТОВАРЫ ───────────────────────────────────────────────────────────────────
 
 app.get('/api/products', async (req, res) => {
     try {
@@ -333,6 +346,8 @@ app.get('/api/products/:id', async (req, res) => {
     }
 });
 
+// ─── КАТЕГОРИИ ────────────────────────────────────────────────────────────────
+
 app.get('/api/categories', async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM categories ORDER BY id');
@@ -360,9 +375,9 @@ app.get('/api/categories/:id/products', async (req, res) => {
     }
 });
 
-
+// ─── Запуск ───────────────────────────────────────────────────────────────────
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`\n Сервер запущен на http://localhost:${PORT}`);
-    console.log(`Проверь товары: http://localhost:${PORT}/api/products`);
-    console.log(`Статус: http://localhost:${PORT}/\n`);
+    console.log(`Сервер запущен на http://localhost:${PORT}`);
+    console.log(`Проверь: http://localhost:${PORT}/api/products`);
+    console.log(`Статус: http://localhost:${PORT}/`);
 });
