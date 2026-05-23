@@ -12,7 +12,38 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'refreshsecret';
 
-app.use(cors());
+// Настройки CORS для VK Mini App
+const allowedOrigins = [
+    'https://plovaks.github.io',
+    'https://vk.com',
+    'https://m.vk.com',
+    'https://localhost:5173',  // для разработки
+    /\.railway\.app$/  // для railway доменов
+];
+
+app.use(cors({
+    origin: function(origin, callback) {
+        // Разрешаем запросы без origin (например, из Postman)
+        if (!origin) return callback(null, true);
+        
+        // Проверяем, разрешен ли origin
+        const isAllowed = allowedOrigins.some(allowed => {
+            if (typeof allowed === 'string') return origin === allowed;
+            if (allowed instanceof RegExp) return allowed.test(origin);
+            return false;
+        });
+        
+        if (isAllowed) {
+            callback(null, true);
+        } else {
+            console.log('CORS blocked origin:', origin);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
 app.use(express.json());
 app.use('/images', express.static(path.join(__dirname, 'public/images')));
 
@@ -26,120 +57,123 @@ app.use((req, res, next) => {
 });
 
 
-// ─── ТЕСТОВЫЙ ЭНДПОИНТ ДЛЯ ПРОВЕРКИ КОНФИГУРАЦИИ ─────────────────────────────
-app.get('/api/debug/config', (req, res) => {
-    res.json({
-        node_env: process.env.NODE_ENV || 'not set',
-        email_user_set: !!process.env.EMAIL_USER,
-        email_user_length: process.env.EMAIL_USER?.length || 0,
-        email_pass_set: !!process.env.EMAIL_PASS,
-        email_pass_length: process.env.EMAIL_PASS?.length || 0,
-        database_url_set: !!process.env.DATABASE_URL,
-        port: PORT,
-        env_vars: Object.keys(process.env).filter(k => !k.includes('PASS') && !k.includes('SECRET'))
-    });
-});
+// // ─── ТЕСТОВЫЙ ЭНДПОИНТ ДЛЯ ПРОВЕРКИ КОНФИГУРАЦИИ ─────────────────────────────
+// app.get('/api/debug/config', (req, res) => {
+//     res.json({
+//         node_env: process.env.NODE_ENV || 'not set',
+//         email_user_set: !!process.env.EMAIL_USER,
+//         email_user_length: process.env.EMAIL_USER?.length || 0,
+//         email_pass_set: !!process.env.EMAIL_PASS,
+//         email_pass_length: process.env.EMAIL_PASS?.length || 0,
+//         database_url_set: !!process.env.DATABASE_URL,
+//         port: PORT,
+//         env_vars: Object.keys(process.env).filter(k => !k.includes('PASS') && !k.includes('SECRET'))
+//     });
+// });
 
-// ─── ТЕСТОВЫЙ ЭНДПОИНТ ДЛЯ ПРОВЕРКИ ПОЧТЫ ────────────────────────────────────
-app.post('/api/debug/test-email', async (req, res) => {
-    const { email } = req.body;
+// // ─── ТЕСТОВЫЙ ЭНДПОИНТ ДЛЯ ПРОВЕРКИ ПОЧТЫ ────────────────────────────────────
+// app.post('/api/debug/test-email', async (req, res) => {
+//     const { email } = req.body;
     
-    console.log('\n🔍 === ДИАГНОСТИКА ПОЧТЫ ===');
-    console.log('1. EMAIL_USER из .env:', process.env.EMAIL_USER ? '✅ ЗАДАН' : ' НЕ ЗАДАН');
-    console.log('2. EMAIL_PASS из .env:', process.env.EMAIL_PASS ? '✅ ЗАДАН' : ' НЕ ЗАДАН');
-    console.log('3. Адрес получателя:', email || ' НЕ УКАЗАН');
+//     console.log('\n🔍 === ДИАГНОСТИКА ПОЧТЫ ===');
+//     console.log('1. EMAIL_USER из .env:', process.env.EMAIL_USER ? '✅ ЗАДАН' : ' НЕ ЗАДАН');
+//     console.log('2. EMAIL_PASS из .env:', process.env.EMAIL_PASS ? '✅ ЗАДАН' : ' НЕ ЗАДАН');
+//     console.log('3. Адрес получателя:', email || ' НЕ УКАЗАН');
     
-    if (!email) {
-        return res.status(400).json({ error: 'Укажите email в поле "email"' });
-    }
+//     if (!email) {
+//         return res.status(400).json({ error: 'Укажите email в поле "email"' });
+//     }
     
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-        console.error(' Ошибка: EMAIL_USER или EMAIL_PASS не заданы в .env!');
-        return res.status(500).json({ 
-            error: 'Почта не настроена: EMAIL_USER или EMAIL_PASS отсутствуют',
-            details: {
-                email_user: !!process.env.EMAIL_USER,
-                email_pass: !!process.env.EMAIL_PASS
-            }
-        });
-    }
+//     if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+//         console.error(' Ошибка: EMAIL_USER или EMAIL_PASS не заданы в .env!');
+//         return res.status(500).json({ 
+//             error: 'Почта не настроена: EMAIL_USER или EMAIL_PASS отсутствуют',
+//             details: {
+//                 email_user: !!process.env.EMAIL_USER,
+//                 email_pass: !!process.env.EMAIL_PASS
+//             }
+//         });
+//     }
     
-    try {
-        console.log('4. Попытка подключения к SMTP...');
+//     try {
+//         console.log('4. Попытка подключения к SMTP...');
         
-        const info = await transporter.sendMail({
-            from: `"Power Store Battery Shop" <${process.env.EMAIL_USER}>`,
-            to: email,
-            subject: 'Тестовое письмо от Power Store',
-            text: `Здравствуйте!
+//         const info = await transporter.sendMail({
+//             from: `"Power Store Battery Shop" <${process.env.EMAIL_USER}>`,
+//             to: email,
+//             subject: 'Тестовое письмо от Power Store',
+//             text: `Здравствуйте!
 
-Это тестовое письмо от вашего интернет-магазина Power Store.
+// Это тестовое письмо от вашего интернет-магазина Power Store.
 
-Если вы получили это письмо — почта настроена правильно и работает!
+// Если вы получили это письмо — почта настроена правильно и работает!
 
-Сообщение отправлено: ${new Date().toLocaleString()}
+// Сообщение отправлено: ${new Date().toLocaleString()}
 
-Спасибо что выбрали Power Store!`,
-            html: `
-                <div style="font-family: Arial, sans-serif; padding: 20px;">
-                    <h2 style="color: #F0D300;">Power Store</h2>
-                    <p>Здравствуйте!</p>
-                    <p>Это <b>тестовое письмо</b> от вашего интернет-магазина аккумуляторов.</p>
-                    <p> Если вы получили это письмо — <b style="color: green;">почта настроена правильно и работает!</b></p>
-                    <hr>
-                    <p style="color: #666; font-size: 12px;">Сообщение отправлено: ${new Date().toLocaleString()}</p>
-                </div>
-            `
-        });
+// Спасибо что выбрали Power Store!`,
+//             html: `
+//                 <div style="font-family: Arial, sans-serif; padding: 20px;">
+//                     <h2 style="color: #F0D300;">Power Store</h2>
+//                     <p>Здравствуйте!</p>
+//                     <p>Это <b>тестовое письмо</b> от вашего интернет-магазина аккумуляторов.</p>
+//                     <p> Если вы получили это письмо — <b style="color: green;">почта настроена правильно и работает!</b></p>
+//                     <hr>
+//                     <p style="color: #666; font-size: 12px;">Сообщение отправлено: ${new Date().toLocaleString()}</p>
+//                 </div>
+//             `
+//         });
         
-        console.log('5.  Письмо УСПЕШНО отправлено!');
-        console.log('6. Message ID:', info.messageId);
-        console.log('7. Ответ сервера:', info.response);
+//         console.log('5.  Письмо УСПЕШНО отправлено!');
+//         console.log('6. Message ID:', info.messageId);
+//         console.log('7. Ответ сервера:', info.response);
         
-        res.json({
-            success: true,
-            messageId: info.messageId,
-            response: info.response,
-            to: email,
-            from: process.env.EMAIL_USER,
-            sentAt: new Date().toISOString()
-        });
+//         res.json({
+//             success: true,
+//             messageId: info.messageId,
+//             response: info.response,
+//             to: email,
+//             from: process.env.EMAIL_USER,
+//             sentAt: new Date().toISOString()
+//         });
         
-    } catch (err) {
-        console.error(' ОШИБКА ПРИ ОТПРАВКЕ ПИСЬМА:');
-        console.error('Код ошибки:', err.code);
-        console.error('Сообщение:', err.message);
-        console.error('Полный стек:', err);
+//     } catch (err) {
+//         console.error(' ОШИБКА ПРИ ОТПРАВКЕ ПИСЬМА:');
+//         console.error('Код ошибки:', err.code);
+//         console.error('Сообщение:', err.message);
+//         console.error('Полный стек:', err);
         
-        res.status(500).json({
-            success: false,
-            error: err.message,
-            code: err.code,
-            details: {
-                email_user: process.env.EMAIL_USER,
-                email_pass_length: process.env.EMAIL_PASS?.length || 0
-            }
-        });
-    }
-});
+//         res.status(500).json({
+//             success: false,
+//             error: err.message,
+//             code: err.code,
+//             details: {
+//                 email_user: process.env.EMAIL_USER,
+//                 email_pass_length: process.env.EMAIL_PASS?.length || 0
+//             }
+//         });
+//     }
+// });
 
-// ─── ТЕСТОВЫЙ ЭНДПОИНТ ДЛЯ ПРОВЕРКИ ПОДКЛЮЧЕНИЯ К БД ──────────────────────────
-app.get('/api/debug/database', async (req, res) => {
-    try {
-        const result = await pool.query('SELECT NOW() as time, version() as pg_version');
-        res.json({
-            connected: true,
-            timestamp: result.rows[0].time,
-            postgres_version: result.rows[0].pg_version
-        });
-    } catch (err) {
-        console.error('Ошибка БД:', err);
-        res.status(500).json({
-            connected: false,
-            error: err.message
-        });
-    }
-});
+// // ─── ТЕСТОВЫЙ ЭНДПОИНТ ДЛЯ ПРОВЕРКИ ПОДКЛЮЧЕНИЯ К БД ──────────────────────────
+// app.get('/api/debug/database', async (req, res) => {
+//     try {
+//         const result = await pool.query('SELECT NOW() as time, version() as pg_version');
+//         res.json({
+//             connected: true,
+//             timestamp: result.rows[0].time,
+//             postgres_version: result.rows[0].pg_version
+//         });
+//     } catch (err) {
+//         console.error('Ошибка БД:', err);
+//         res.status(500).json({
+//             connected: false,
+//             error: err.message
+//         });
+//     }
+// });
+
+
+
 
 // ─── База данных ───────────────────────────────────────────────────────────────
 const pool = new Pool({
@@ -156,6 +190,8 @@ pool.connect((err, client, release) => {
     }
 });
 
+
+
 // ─── Почта (Gmail SMTP с паролем приложения) ───────────────────────────────────
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
@@ -165,7 +201,7 @@ const transporter = nodemailer.createTransport({
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
     },
-    family: 4  // принудительно IPv4
+    family: 4  
 });
 
 // Проверка подключения к почте
@@ -303,6 +339,7 @@ app.post('/api/auth/refresh', async (req, res) => {
 // ─── ПРОФИЛЬ ──────────────────────────────────────────────────────────────────
 
 app.get('/api/customer/me', authMiddleware, async (req, res) => {
+    console.log(' ЗАПРОС НА ЗАКАЗ ПОЛУЧЕН! ');
     try {
         const result = await pool.query(
             'SELECT id, full_name, email, created_at FROM customers WHERE id = $1',
@@ -399,16 +436,16 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
                 subject: `Заказ №${order.id} оформлен — Power Store`,
                 text: `Здравствуйте!
 
-Ваш заказ №${order.id} успешно оформлен.
+                Ваш заказ №${order.id} успешно оформлен.
 
-Состав заказа:
-${itemsList}
+                Состав заказа:
+                ${itemsList}
 
-Итого: ${total_amount} ₽
+                Итого: ${total_amount} ₽
 
-С вами свяжутся для подтверждения заказа и уточнения деталей доставки.
+                С вами свяжутся для подтверждения заказа и уточнения деталей доставки.
 
-Спасибо что выбрали Power Store!`
+                Спасибо что выбрали Power Store!`
             });
             console.log('Письмо отправлено!');
         } catch (mailErr) {

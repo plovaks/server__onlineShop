@@ -1,0 +1,14 @@
+.offers{
+    font-size: 15px;
+    color:#000000;
+    display: flex;
+    align-items: center;
+    gap:7px;
+    
+}
+
+.offer__price{
+    color:#4F77F1;
+    font-size: 18px;
+    font-weight: 600;
+}
