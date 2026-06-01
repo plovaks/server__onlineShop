@@ -15,6 +15,7 @@ const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'refreshsecret';
 // Настройки CORS для VK Mini App
 const allowedOrigins = [
     'https://plovaks.github.io',
+    'https://power-store-frontend.username.amvera.io',
     'https://vk.com',
     'https://m.vk.com',
     'https://localhost:5173',  // для разработки
@@ -228,13 +229,11 @@ function authMiddleware(req, res, next) {
         res.status(401).json({ error: 'Недействительный токен' });
     }
 }
-
 app.get('/', (req, res) => {
     res.json({ message: 'API работает', status: 'ok' });
 });
 
-// ─── АВТОРИЗАЦИЯ ──────────────────────────────────────────────────────────────
-
+// авторизация
 app.post('/api/auth/register', async (req, res) => {
     const { full_name, email, password } = req.body;
     if (!full_name || !email || !password) {
