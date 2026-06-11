@@ -22,6 +22,37 @@ const allowedOrigins = [
     /\.railway\.app$/  // для railway доменов
 ];
 
+const dns = require('dns').promises;
+
+// Проверка существования домена email
+async function isDomainValid(email) {
+    const domain = email.split('@')[1];
+    try {
+        // Проверяем MX записи домена
+        const mxRecords = await dns.resolveMx(domain);
+        return mxRecords && mxRecords.length > 0;
+    } catch (error) {
+        return false;
+    }
+}
+
+// Валидация email формата
+const isValidEmail = (email) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+};
+
+// Валидация ФИО (только буквы, пробелы, дефисы)
+const isValidFullName = (name) => {
+    const nameRegex = /^[A-Za-zА-Яа-я\s\-]{2,50}$/;
+    return nameRegex.test(name.trim());
+};
+
+// Валидация пароля
+const isValidPassword = (password) => {
+    return password && password.length >= 6;
+};
+
 app.use(cors({
     origin: function(origin, callback) {
         // Разрешаем запросы без origin (например, из Postman)
@@ -229,29 +260,84 @@ function authMiddleware(req, res, next) {
         res.status(401).json({ error: 'Недействительный токен' });
     }
 }
+
+// Middleware: проверка прав администратора
+async function adminMiddleware(req, res, next) {
+    if (!req.user) {
+        return res.status(401).json({ error: 'Не авторизован' });
+    }
+    
+    try {
+        const result = await pool.query(
+            'SELECT is_admin FROM customers WHERE id = $1',
+            [req.user.id]
+        );
+        
+        if (result.rows.length === 0 || !result.rows[0].is_admin) {
+            return res.status(403).json({ error: 'Доступ запрещён. Требуются права администратора.' });
+        }
+        
+        next();
+    } catch (err) {
+        console.error('Ошибка проверки прав администратора:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+}
+
+
+
+
 app.get('/', (req, res) => {
     res.json({ message: 'API работает', status: 'ok' });
 });
 
+
+
 // авторизация
 app.post('/api/auth/register', async (req, res) => {
     const { full_name, email, password } = req.body;
+    
+    // Проверка наличия всех полей
     if (!full_name || !email || !password) {
         return res.status(400).json({ error: 'Заполните все поля' });
     }
-    if (password.length < 6) {
-        return res.status(400).json({ error: 'Пароль минимум 6 символов' });
+    
+    // Валидация ФИО
+    if (!isValidFullName(full_name)) {
+        return res.status(400).json({ 
+            error: 'ФИО должно содержать только буквы, пробелы и дефисы (2-50 символов)' 
+        });
     }
-    if (!email.includes('@')) {
-        return res.status(400).json({ error: 'Некорректный email' });
+    
+    // Валидация email формата
+    if (!isValidEmail(email)) {
+        return res.status(400).json({ 
+            error: 'Введите корректный email' 
+        });
     }
+    
+    
+    const isDomainExist = await isDomainValid(email);
+    if (!isDomainExist) {
+        return res.status(400).json({ 
+            error: 'Такой email домен не существует. Проверьте правильность написания email' 
+        });
+    }
+    
+    // Валидация пароля
+    if (!isValidPassword(password)) {
+        return res.status(400).json({ 
+            error: 'Пароль должен содержать минимум 6 символов' 
+        });
+    }
+    
     try {
         const hash = await bcrypt.hash(password, 10);
         const result = await pool.query(
             `INSERT INTO customers (full_name, email, password)
              VALUES ($1, $2, $3)
-             RETURNING id, full_name, email, created_at`,
-            [full_name, email, hash]
+             RETURNING id, full_name, email, created_at, is_admin`,
+            [full_name.trim(), email.toLowerCase(), hash]
         );
         const customer = result.rows[0];
         const token = jwt.sign(
@@ -276,12 +362,20 @@ app.post('/api/auth/register', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
+    
     if (!email || !password) {
         return res.status(400).json({ error: 'Заполните все поля' });
     }
+    
+    // Валидация email формата
+    if (!isValidEmail(email)) {
+        return res.status(400).json({ error: 'Введите корректный email' });
+    }
+    
     try {
         const result = await pool.query(
-            'SELECT * FROM customers WHERE email = $1', [email]
+            'SELECT * FROM customers WHERE email = $1', 
+            [email.toLowerCase()] // Поиск в нижнем регистре
         );
         const customer = result.rows[0];
         if (!customer) {
@@ -308,7 +402,8 @@ app.post('/api/auth/login', async (req, res) => {
                 id: customer.id,
                 full_name: customer.full_name,
                 email: customer.email,
-                created_at: customer.created_at
+                created_at: customer.created_at,
+                is_admin: customer.is_admin
             }
         });
     } catch (err) {
@@ -338,10 +433,10 @@ app.post('/api/auth/refresh', async (req, res) => {
 // ─── ПРОФИЛЬ ──────────────────────────────────────────────────────────────────
 
 app.get('/api/customer/me', authMiddleware, async (req, res) => {
-    console.log(' ЗАПРОС НА ЗАКАЗ ПОЛУЧЕН! ');
+    console.log(' ЗАПРОС НА ПРОФИЛЬ ПОЛУЧЕН! ');
     try {
         const result = await pool.query(
-            'SELECT id, full_name, email, created_at FROM customers WHERE id = $1',
+            'SELECT id, full_name, email, created_at, is_admin FROM customers WHERE id = $1',
             [req.user.id]
         );
         if (result.rows.length === 0) {
@@ -534,6 +629,110 @@ app.get('/api/categories/:id/products', async (req, res) => {
         res.status(500).json({ error: 'Ошибка сервера' });
     }
 });
+
+// АДМИН ПАНЕЛЬ 
+
+// Получить всех пользователей
+app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT id, full_name, email, created_at, is_admin FROM customers ORDER BY id'
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Ошибка получения пользователей:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// Назначить/снять права администратора
+app.patch('/api/admin/users/:id/toggle-admin', authMiddleware, adminMiddleware, async (req, res) => {
+    const { id } = req.params;
+    const { is_admin } = req.body;
+    
+    // Нельзя снять админку с самого себя
+    if (parseInt(id) === req.user.id && is_admin === false) {
+        return res.status(400).json({ error: 'Нельзя снять права администратора с самого себя' });
+    }
+    
+    try {
+        const result = await pool.query(
+            'UPDATE customers SET is_admin = $1 WHERE id = $2 RETURNING id, full_name, email, is_admin',
+            [is_admin, id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('Ошибка обновления прав:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// Получить все заказы всех пользователей
+app.get('/api/admin/orders', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT o.*, c.full_name, c.email 
+            FROM orders o
+            JOIN customers c ON o.customer_id = c.id
+            ORDER BY o.order_date DESC
+        `);
+        
+        const orders = await Promise.all(result.rows.map(async (order) => {
+            const itemsResult = await pool.query(
+                `SELECT * FROM order_items WHERE order_id = $1`,
+                [order.id]
+            );
+            return { ...order, items: itemsResult.rows };
+        }));
+        
+        res.json(orders);
+    } catch (err) {
+        console.error('Ошибка получения заказов:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// Добавить товар (опционально)
+app.post('/api/admin/products', authMiddleware, adminMiddleware, async (req, res) => {
+    const { name, model, price, type, brand, in_stock } = req.body;
+    
+    if (!name || !price) {
+        return res.status(400).json({ error: 'Название и цена обязательны' });
+    }
+    
+    try {
+        const result = await pool.query(
+            `INSERT INTO products (name, model, price, type, brand, in_stock)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING *`,
+            [name, model || null, price, type || null, brand || null, in_stock !== false]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error('Ошибка добавления товара:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// Удалить товар
+app.delete('/api/admin/products/:id', authMiddleware, adminMiddleware, async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        const result = await pool.query('DELETE FROM products WHERE id = $1 RETURNING id', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Товар не найден' });
+        }
+        res.json({ message: 'Товар удалён' });
+    } catch (err) {
+        console.error('Ошибка удаления товара:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
 
 // ─── Запуск ───────────────────────────────────────────────────────────────────
 app.listen(PORT, '0.0.0.0', () => {
