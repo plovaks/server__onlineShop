@@ -4,9 +4,6 @@ meta:
     name: npm
     version: 18
 
-build:
-  buildCommand: npm install
-
 run:
-  runCommand: node server.js
+  scriptName: server.js
   containerPort: 3000
