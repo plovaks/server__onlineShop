@@ -5,10 +5,10 @@ meta:
     version: 18
 
 build:
-  command: npm install
-  additionalCommands: echo "Зависимости установлены"
+  buildCommand: npm install
+  buildCommandAdditional: echo "Зависимости установлены"
 
 run:
-  command: node server.js
+  runCommand: node server.js
   persistenceMount: /data
   containerPort: 3000
