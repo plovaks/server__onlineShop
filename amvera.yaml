@@ -6,9 +6,7 @@ meta:
 
 build:
   buildCommand: npm install
-  buildCommandAdditional: echo "Зависимости установлены"
 
 run:
   runCommand: node server.js
-  persistenceMount: /data
   containerPort: 3000
