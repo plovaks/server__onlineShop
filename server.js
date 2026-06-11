@@ -15,7 +15,7 @@ const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'refreshsecret';
 // Настройки CORS для VK Mini App
 const allowedOrigins = [
     'https://plovaks.github.io',
-    'https://power-store-frontend.username.amvera.io',
+    'https://power-store-frontend-plovaks.amvera.io',
     'https://vk.com',
     'https://m.vk.com',
     'https://localhost:5173',  // для разработки
