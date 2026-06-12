@@ -18,19 +18,17 @@ const allowedOrigins = [
     'https://power-store-frontend-plovaks.amvera.io',
     'https://vk.com',
     'https://m.vk.com',
-    'https://localhost:5173',  // для разработки
+    'https://localhost:5173',
     'http://localhost:3001',
     'http://localhost:3000',
-    /\.railway\.app$/  // для railway доменов
+    /\.railway\.app$/
 ];
 
 const dns = require('dns').promises;
 
-// Проверка существования домена email
 async function isDomainValid(email) {
     const domain = email.split('@')[1];
     try {
-        // Проверяем MX записи домена
         const mxRecords = await dns.resolveMx(domain);
         return mxRecords && mxRecords.length > 0;
     } catch (error) {
@@ -38,35 +36,28 @@ async function isDomainValid(email) {
     }
 }
 
-// Валидация email формата
 const isValidEmail = (email) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
 };
 
-// Валидация ФИО (только буквы, пробелы, дефисы)
 const isValidFullName = (name) => {
     const nameRegex = /^[A-Za-zА-Яа-я\s\-]{2,50}$/;
     return nameRegex.test(name.trim());
 };
 
-// Валидация пароля
 const isValidPassword = (password) => {
     return password && password.length >= 6;
 };
 
 app.use(cors({
     origin: function(origin, callback) {
-        // Разрешаем запросы без origin (например, из Postman)
         if (!origin) return callback(null, true);
-        
-        // Проверяем, разрешен ли origin
         const isAllowed = allowedOrigins.some(allowed => {
             if (typeof allowed === 'string') return origin === allowed;
             if (allowed instanceof RegExp) return allowed.test(origin);
             return false;
         });
-        
         if (isAllowed) {
             callback(null, true);
         } else {
@@ -81,7 +72,6 @@ app.use(cors({
 app.use(express.json());
 app.use('/images', express.static(path.join(__dirname, 'public/images')));
 
-// Логирование всех входящих запросов
 app.use((req, res, next) => {
     console.log(` [${new Date().toISOString()}] ${req.method} ${req.url}`);
     if (req.body && Object.keys(req.body).length > 0) {
@@ -90,126 +80,6 @@ app.use((req, res, next) => {
     next();
 });
 
-
-// // ─── ТЕСТОВЫЙ ЭНДПОИНТ ДЛЯ ПРОВЕРКИ КОНФИГУРАЦИИ ─────────────────────────────
-// app.get('/api/debug/config', (req, res) => {
-//     res.json({
-//         node_env: process.env.NODE_ENV || 'not set',
-//         email_user_set: !!process.env.EMAIL_USER,
-//         email_user_length: process.env.EMAIL_USER?.length || 0,
-//         email_pass_set: !!process.env.EMAIL_PASS,
-//         email_pass_length: process.env.EMAIL_PASS?.length || 0,
-//         database_url_set: !!process.env.DATABASE_URL,
-//         port: PORT,
-//         env_vars: Object.keys(process.env).filter(k => !k.includes('PASS') && !k.includes('SECRET'))
-//     });
-// });
-
-// // ─── ТЕСТОВЫЙ ЭНДПОИНТ ДЛЯ ПРОВЕРКИ ПОЧТЫ ────────────────────────────────────
-// app.post('/api/debug/test-email', async (req, res) => {
-//     const { email } = req.body;
-    
-//     console.log('\n🔍 === ДИАГНОСТИКА ПОЧТЫ ===');
-//     console.log('1. EMAIL_USER из .env:', process.env.EMAIL_USER ? '✅ ЗАДАН' : ' НЕ ЗАДАН');
-//     console.log('2. EMAIL_PASS из .env:', process.env.EMAIL_PASS ? '✅ ЗАДАН' : ' НЕ ЗАДАН');
-//     console.log('3. Адрес получателя:', email || ' НЕ УКАЗАН');
-    
-//     if (!email) {
-//         return res.status(400).json({ error: 'Укажите email в поле "email"' });
-//     }
-    
-//     if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-//         console.error(' Ошибка: EMAIL_USER или EMAIL_PASS не заданы в .env!');
-//         return res.status(500).json({ 
-//             error: 'Почта не настроена: EMAIL_USER или EMAIL_PASS отсутствуют',
-//             details: {
-//                 email_user: !!process.env.EMAIL_USER,
-//                 email_pass: !!process.env.EMAIL_PASS
-//             }
-//         });
-//     }
-    
-//     try {
-//         console.log('4. Попытка подключения к SMTP...');
-        
-//         const info = await transporter.sendMail({
-//             from: `"Power Store Battery Shop" <${process.env.EMAIL_USER}>`,
-//             to: email,
-//             subject: 'Тестовое письмо от Power Store',
-//             text: `Здравствуйте!
-
-// Это тестовое письмо от вашего интернет-магазина Power Store.
-
-// Если вы получили это письмо — почта настроена правильно и работает!
-
-// Сообщение отправлено: ${new Date().toLocaleString()}
-
-// Спасибо что выбрали Power Store!`,
-//             html: `
-//                 <div style="font-family: Arial, sans-serif; padding: 20px;">
-//                     <h2 style="color: #F0D300;">Power Store</h2>
-//                     <p>Здравствуйте!</p>
-//                     <p>Это <b>тестовое письмо</b> от вашего интернет-магазина аккумуляторов.</p>
-//                     <p> Если вы получили это письмо — <b style="color: green;">почта настроена правильно и работает!</b></p>
-//                     <hr>
-//                     <p style="color: #666; font-size: 12px;">Сообщение отправлено: ${new Date().toLocaleString()}</p>
-//                 </div>
-//             `
-//         });
-        
-//         console.log('5.  Письмо УСПЕШНО отправлено!');
-//         console.log('6. Message ID:', info.messageId);
-//         console.log('7. Ответ сервера:', info.response);
-        
-//         res.json({
-//             success: true,
-//             messageId: info.messageId,
-//             response: info.response,
-//             to: email,
-//             from: process.env.EMAIL_USER,
-//             sentAt: new Date().toISOString()
-//         });
-        
-//     } catch (err) {
-//         console.error(' ОШИБКА ПРИ ОТПРАВКЕ ПИСЬМА:');
-//         console.error('Код ошибки:', err.code);
-//         console.error('Сообщение:', err.message);
-//         console.error('Полный стек:', err);
-        
-//         res.status(500).json({
-//             success: false,
-//             error: err.message,
-//             code: err.code,
-//             details: {
-//                 email_user: process.env.EMAIL_USER,
-//                 email_pass_length: process.env.EMAIL_PASS?.length || 0
-//             }
-//         });
-//     }
-// });
-
-// // ─── ТЕСТОВЫЙ ЭНДПОИНТ ДЛЯ ПРОВЕРКИ ПОДКЛЮЧЕНИЯ К БД ──────────────────────────
-// app.get('/api/debug/database', async (req, res) => {
-//     try {
-//         const result = await pool.query('SELECT NOW() as time, version() as pg_version');
-//         res.json({
-//             connected: true,
-//             timestamp: result.rows[0].time,
-//             postgres_version: result.rows[0].pg_version
-//         });
-//     } catch (err) {
-//         console.error('Ошибка БД:', err);
-//         res.status(500).json({
-//             connected: false,
-//             error: err.message
-//         });
-//     }
-// });
-
-
-
-
-// ─── База данных ───────────────────────────────────────────────────────────────
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
@@ -224,9 +94,6 @@ pool.connect((err, client, release) => {
     }
 });
 
-
-
-// ─── Почта (Gmail SMTP с паролем приложения) ───────────────────────────────────
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 465,
@@ -238,7 +105,6 @@ const transporter = nodemailer.createTransport({
     family: 4  
 });
 
-// Проверка подключения к почте
 transporter.verify((error, success) => {
     if (error) {
         console.error('Ошибка настройки почты:', error);
@@ -248,7 +114,6 @@ transporter.verify((error, success) => {
     }
 });
 
-// ─── Middleware: проверка JWT ──────────────────────────────────────────────────
 function authMiddleware(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -263,22 +128,18 @@ function authMiddleware(req, res, next) {
     }
 }
 
-// Middleware: проверка прав администратора
 async function adminMiddleware(req, res, next) {
     if (!req.user) {
         return res.status(401).json({ error: 'Не авторизован' });
     }
-    
     try {
         const result = await pool.query(
             'SELECT is_admin FROM customers WHERE id = $1',
             [req.user.id]
         );
-        
         if (result.rows.length === 0 || !result.rows[0].is_admin) {
             return res.status(403).json({ error: 'Доступ запрещён. Требуются права администратора.' });
         }
-        
         next();
     } catch (err) {
         console.error('Ошибка проверки прав администратора:', err);
@@ -286,53 +147,30 @@ async function adminMiddleware(req, res, next) {
     }
 }
 
-
-
-
 app.get('/', (req, res) => {
     res.json({ message: 'API работает', status: 'ok' });
 });
 
+// ─── АВТОРИЗАЦИЯ ──────────────────────────────────────────────────────────────
 
-
-// авторизация
 app.post('/api/auth/register', async (req, res) => {
     const { full_name, email, password } = req.body;
-    
-    // Проверка наличия всех полей
     if (!full_name || !email || !password) {
         return res.status(400).json({ error: 'Заполните все поля' });
     }
-    
-    // Валидация ФИО
     if (!isValidFullName(full_name)) {
-        return res.status(400).json({ 
-            error: 'ФИО должно содержать только буквы, пробелы и дефисы (2-50 символов)' 
-        });
+        return res.status(400).json({ error: 'ФИО должно содержать только буквы, пробелы и дефисы (2-50 символов)' });
     }
-    
-    // Валидация email формата
     if (!isValidEmail(email)) {
-        return res.status(400).json({ 
-            error: 'Введите корректный email' 
-        });
+        return res.status(400).json({ error: 'Введите корректный email' });
     }
-    
-    
     const isDomainExist = await isDomainValid(email);
     if (!isDomainExist) {
-        return res.status(400).json({ 
-            error: 'Такой email домен не существует. Проверьте правильность написания email' 
-        });
+        return res.status(400).json({ error: 'Такой email домен не существует. Проверьте правильность написания email' });
     }
-    
-    // Валидация пароля
     if (!isValidPassword(password)) {
-        return res.status(400).json({ 
-            error: 'Пароль должен содержать минимум 6 символов' 
-        });
+        return res.status(400).json({ error: 'Пароль должен содержать минимум 6 символов' });
     }
-    
     try {
         const hash = await bcrypt.hash(password, 10);
         const result = await pool.query(
@@ -364,20 +202,16 @@ app.post('/api/auth/register', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
-    
     if (!email || !password) {
         return res.status(400).json({ error: 'Заполните все поля' });
     }
-    
-    // Валидация email формата
     if (!isValidEmail(email)) {
         return res.status(400).json({ error: 'Введите корректный email' });
     }
-    
     try {
         const result = await pool.query(
             'SELECT * FROM customers WHERE email = $1', 
-            [email.toLowerCase()] // Поиск в нижнем регистре
+            [email.toLowerCase()]
         );
         const customer = result.rows[0];
         if (!customer) {
@@ -468,7 +302,7 @@ app.patch('/api/customer/me', authMiddleware, async (req, res) => {
     }
 });
 
-// ─── ЗАКАЗЫ ───────────────────────────────────────────────────────────────────
+// ─── ЗАКАЗЫ (С УМЕНЬШЕНИЕМ in_stock) ─────────────────────────────────────────
 
 app.get('/api/customer/orders', authMiddleware, async (req, res) => {
     try {
@@ -501,6 +335,30 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
     try {
         await client.query('BEGIN');
 
+        // Проверяем наличие товаров и уменьшаем количество
+        for (const item of items) {
+            const productResult = await client.query(
+                'SELECT in_stock FROM products WHERE id = $1',
+                [item.product_id]
+            );
+            
+            if (productResult.rows.length === 0) {
+                throw new Error(`Товар с id ${item.product_id} не найден`);
+            }
+            
+            const currentStock = productResult.rows[0].in_stock;
+            if (currentStock < item.quantity) {
+                throw new Error(`Недостаточно товара "${item.name}". В наличии: ${currentStock} шт.`);
+            }
+            
+            // Уменьшаем количество на складе
+            await client.query(
+                'UPDATE products SET in_stock = in_stock - $1 WHERE id = $2',
+                [item.quantity, item.product_id]
+            );
+        }
+
+        // Создаём заказ
         const orderResult = await client.query(
             `INSERT INTO orders (customer_id, total_amount, status)
              VALUES ($1, $2, 'pending') RETURNING *`,
@@ -508,6 +366,7 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
         );
         const order = orderResult.rows[0];
 
+        // Добавляем товары в order_items
         for (const item of items) {
             await client.query(
                 `INSERT INTO order_items (order_id, product_id, name, quantity, price)
@@ -523,7 +382,6 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
             `• ${item.name} — ${item.quantity} шт. × ${item.price} ₽ = ${item.quantity * item.price} ₽`
         ).join('\n');
 
-        // Отправляем письмо через Gmail SMTP
         console.log('Отправляем письмо на:', req.user.email);
         try {
             await transporter.sendMail({
@@ -532,16 +390,16 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
                 subject: `Заказ №${order.id} оформлен — Power Store`,
                 text: `Здравствуйте!
 
-                Ваш заказ №${order.id} успешно оформлен.
+Ваш заказ №${order.id} успешно оформлен.
 
-                Состав заказа:
-                ${itemsList}
+Состав заказа:
+${itemsList}
 
-                Итого: ${total_amount} ₽
+Итого: ${total_amount} ₽
 
-                С вами свяжутся для подтверждения заказа и уточнения деталей доставки.
+С вами свяжутся для подтверждения заказа и уточнения деталей доставки.
 
-                Спасибо что выбрали Power Store!`
+Спасибо что выбрали Power Store!`
             });
             console.log('Письмо отправлено!');
         } catch (mailErr) {
@@ -553,7 +411,7 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
     } catch (err) {
         await client.query('ROLLBACK');
         console.error('Ошибка создания заказа:', err);
-        res.status(500).json({ error: 'Ошибка сервера' });
+        res.status(400).json({ error: err.message || 'Ошибка сервера' });
     } finally {
         client.release();
     }
@@ -632,9 +490,8 @@ app.get('/api/categories/:id/products', async (req, res) => {
     }
 });
 
-// АДМИН ПАНЕЛЬ 
+// ─── АДМИН ПАНЕЛЬ ─────────────────────────────────────────────────────────────
 
-// Получить всех пользователей
 app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
     try {
         const result = await pool.query(
@@ -647,12 +504,10 @@ app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) =>
     }
 });
 
-// Назначить/снять права администратора
 app.patch('/api/admin/users/:id/toggle-admin', authMiddleware, adminMiddleware, async (req, res) => {
     const { id } = req.params;
     const { is_admin } = req.body;
     
-    // Нельзя снять админку с самого себя
     if (parseInt(id) === req.user.id && is_admin === false) {
         return res.status(400).json({ error: 'Нельзя снять права администратора с самого себя' });
     }
@@ -672,7 +527,6 @@ app.patch('/api/admin/users/:id/toggle-admin', authMiddleware, adminMiddleware, 
     }
 });
 
-// Получить все заказы всех пользователей
 app.get('/api/admin/orders', authMiddleware, adminMiddleware, async (req, res) => {
     try {
         const result = await pool.query(`
@@ -697,7 +551,6 @@ app.get('/api/admin/orders', authMiddleware, adminMiddleware, async (req, res) =
     }
 });
 
-// Добавить товар (опционально)
 app.post('/api/admin/products', authMiddleware, adminMiddleware, async (req, res) => {
     const { name, model, price, type, brand, in_stock } = req.body;
     
@@ -710,7 +563,7 @@ app.post('/api/admin/products', authMiddleware, adminMiddleware, async (req, res
             `INSERT INTO products (name, model, price, type, brand, in_stock)
              VALUES ($1, $2, $3, $4, $5, $6)
              RETURNING *`,
-            [name, model || null, price, type || null, brand || null, in_stock !== false]
+            [name, model || null, price, type || null, brand || null, in_stock || 0]
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
@@ -719,10 +572,8 @@ app.post('/api/admin/products', authMiddleware, adminMiddleware, async (req, res
     }
 });
 
-// Удалить товар
 app.delete('/api/admin/products/:id', authMiddleware, adminMiddleware, async (req, res) => {
     const { id } = req.params;
-    
     try {
         const result = await pool.query('DELETE FROM products WHERE id = $1 RETURNING id', [id]);
         if (result.rows.length === 0) {
@@ -735,8 +586,6 @@ app.delete('/api/admin/products/:id', authMiddleware, adminMiddleware, async (re
     }
 });
 
-
-// Получить все товары (для админки)
 app.get('/api/admin/products', authMiddleware, adminMiddleware, async (req, res) => {
     try {
         const result = await pool.query(`
@@ -756,7 +605,6 @@ app.get('/api/admin/products', authMiddleware, adminMiddleware, async (req, res)
     }
 });
 
-// Обновить товар
 app.put('/api/admin/products/:id', authMiddleware, adminMiddleware, async (req, res) => {
     const { id } = req.params;
     const { name, model, price, type, brand, in_stock } = req.body;
