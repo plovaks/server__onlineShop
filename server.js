@@ -19,6 +19,8 @@ const allowedOrigins = [
     'https://vk.com',
     'https://m.vk.com',
     'https://localhost:5173',  // для разработки
+    'http://localhost:3001',
+    'http://localhost:3000',
     /\.railway\.app$/  // для railway доменов
 ];
 
@@ -733,6 +735,56 @@ app.delete('/api/admin/products/:id', authMiddleware, adminMiddleware, async (re
     }
 });
 
+
+// Получить все товары (для админки)
+app.get('/api/admin/products', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT p.*,
+                COALESCE((SELECT json_agg(json_build_object(
+                    'url', pi.image_url, 'is_main', pi.is_main, 'sort_order', pi.sort_order
+                ) ORDER BY pi.sort_order) FROM product_images pi WHERE pi.product_id = p.id), '[]'::json) AS images,
+                COALESCE((SELECT json_agg(json_build_object(
+                    'name', s.name, 'value', ps.value, 'unit', s.unit
+                )) FROM product_specifications ps JOIN specifications s ON ps.spec_id = s.id WHERE ps.product_id = p.id), '[]'::json) AS specs
+            FROM products p ORDER BY p.id
+        `);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Ошибка получения товаров:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// Обновить товар
+app.put('/api/admin/products/:id', authMiddleware, adminMiddleware, async (req, res) => {
+    const { id } = req.params;
+    const { name, model, price, type, brand, in_stock } = req.body;
+    
+    try {
+        const result = await pool.query(
+            `UPDATE products 
+             SET name = COALESCE($1, name),
+                 model = COALESCE($2, model),
+                 price = COALESCE($3, price),
+                 type = COALESCE($4, type),
+                 brand = COALESCE($5, brand),
+                 in_stock = COALESCE($6, in_stock)
+             WHERE id = $7
+             RETURNING *`,
+            [name, model, price, type, brand, in_stock, id]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Товар не найден' });
+        }
+        
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('Ошибка обновления товара:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
 
 // ─── Запуск ───────────────────────────────────────────────────────────────────
 app.listen(PORT, '0.0.0.0', () => {
