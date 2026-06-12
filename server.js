@@ -338,7 +338,7 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
         // Проверяем наличие товаров и уменьшаем количество
         for (const item of items) {
             const productResult = await client.query(
-                'SELECT in_stock FROM products WHERE id = $1',
+                'SELECT stock FROM products WHERE id = $1',  // ← stock
                 [item.product_id]
             );
             
@@ -346,14 +346,14 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
                 throw new Error(`Товар с id ${item.product_id} не найден`);
             }
             
-            const currentStock = productResult.rows[0].in_stock;
+            const currentStock = productResult.rows[0].stock; 
             if (currentStock < item.quantity) {
                 throw new Error(`Недостаточно товара "${item.name}". В наличии: ${currentStock} шт.`);
             }
             
             // Уменьшаем количество на складе
             await client.query(
-                'UPDATE products SET in_stock = in_stock - $1 WHERE id = $2',
+                'UPDATE products SET stock = stock - $1 WHERE id = $2',  // ← stock
                 [item.quantity, item.product_id]
             );
         }
