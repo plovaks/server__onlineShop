@@ -4,6 +4,7 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
+const cookieParser = require('cookie-parser');
 require('dotenv').config();
 const path = require('path');
 
@@ -70,6 +71,7 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 app.use(express.json());
+app.use(cookieParser());
 app.use('/images', express.static(path.join(__dirname, 'public/images')));
 
 app.use((req, res, next) => {
@@ -114,16 +116,19 @@ transporter.verify((error, success) => {
     }
 });
 
+// Middleware: проверка JWT из кук или из заголовка
 function authMiddleware(req, res, next) {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const token = req.cookies.token || req.headers.authorization?.split(' ')[1];
+    if (!token) {
         return res.status(401).json({ error: 'Не авторизован' });
     }
-    const token = authHeader.split(' ')[1];
     try {
         req.user = jwt.verify(token, JWT_SECRET);
         next();
-    } catch {
+    } catch (err) {
+        if (err.name === 'TokenExpiredError') {
+            return res.status(401).json({ error: 'Токен истёк' });
+        }
         res.status(401).json({ error: 'Недействительный токен' });
     }
 }
@@ -190,7 +195,22 @@ app.post('/api/auth/register', async (req, res) => {
             JWT_REFRESH_SECRET,
             { expiresIn: '30d' }
         );
-        res.status(201).json({ token, refreshToken, customer });
+        
+        // Устанавливаем httpOnly куки
+        res.cookie('token', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 15 * 60 * 1000 // 15 минут
+        });
+        res.cookie('refreshToken', refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 30 * 24 * 60 * 60 * 1000 // 30 дней
+        });
+        
+        res.status(201).json({ customer });
     } catch (err) {
         if (err.code === '23505') {
             return res.status(409).json({ error: 'Этот email уже зарегистрирован' });
@@ -231,9 +251,22 @@ app.post('/api/auth/login', async (req, res) => {
             JWT_REFRESH_SECRET,
             { expiresIn: '30d' }
         );
+        
+        // Устанавливаем httpOnly куки
+        res.cookie('token', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 15 * 60 * 1000
+        });
+        res.cookie('refreshToken', refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 30 * 24 * 60 * 60 * 1000
+        });
+        
         res.json({
-            token,
-            refreshToken,
             customer: {
                 id: customer.id,
                 full_name: customer.full_name,
@@ -249,7 +282,7 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 app.post('/api/auth/refresh', async (req, res) => {
-    const { refreshToken } = req.body;
+    const refreshToken = req.cookies.refreshToken;
     if (!refreshToken) {
         return res.status(401).json({ error: 'Нет refresh токена' });
     }
@@ -260,10 +293,24 @@ app.post('/api/auth/refresh', async (req, res) => {
             JWT_SECRET,
             { expiresIn: '15m' }
         );
-        res.json({ token: newToken });
+        
+        res.cookie('token', newToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 15 * 60 * 1000
+        });
+        
+        res.json({ success: true });
     } catch {
         res.status(401).json({ error: 'Refresh токен недействителен' });
     }
+});
+
+app.post('/api/auth/logout', async (req, res) => {
+    res.clearCookie('token');
+    res.clearCookie('refreshToken');
+    res.json({ success: true });
 });
 
 // ─── ПРОФИЛЬ ──────────────────────────────────────────────────────────────────
@@ -302,7 +349,7 @@ app.patch('/api/customer/me', authMiddleware, async (req, res) => {
     }
 });
 
-// ─── ЗАКАЗЫ (С УМЕНЬШЕНИЕМ in_stock) ─────────────────────────────────────────
+// ─── ЗАКАЗЫ (С УМЕНЬШЕНИЕМ stock) ────────────────────────────────────────────
 
 app.get('/api/customer/orders', authMiddleware, async (req, res) => {
     try {
@@ -335,10 +382,9 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        // Проверяем наличие товаров и уменьшаем количество
         for (const item of items) {
             const productResult = await client.query(
-                'SELECT stock FROM products WHERE id = $1',  // ← stock
+                'SELECT stock FROM products WHERE id = $1',
                 [item.product_id]
             );
             
@@ -346,19 +392,17 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
                 throw new Error(`Товар с id ${item.product_id} не найден`);
             }
             
-            const currentStock = productResult.rows[0].stock; 
+            const currentStock = productResult.rows[0].stock;
             if (currentStock < item.quantity) {
                 throw new Error(`Недостаточно товара "${item.name}". В наличии: ${currentStock} шт.`);
             }
             
-            // Уменьшаем количество на складе
             await client.query(
-                'UPDATE products SET stock = stock - $1 WHERE id = $2',  // ← stock
+                'UPDATE products SET stock = stock - $1 WHERE id = $2',
                 [item.quantity, item.product_id]
             );
         }
 
-        // Создаём заказ
         const orderResult = await client.query(
             `INSERT INTO orders (customer_id, total_amount, status)
              VALUES ($1, $2, 'pending') RETURNING *`,
@@ -366,7 +410,6 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
         );
         const order = orderResult.rows[0];
 
-        // Добавляем товары в order_items
         for (const item of items) {
             await client.query(
                 `INSERT INTO order_items (order_id, product_id, name, quantity, price)
@@ -377,7 +420,6 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
 
         await client.query('COMMIT');
 
-        // Формируем список товаров для письма
         const itemsList = items.map(item =>
             `• ${item.name} — ${item.quantity} шт. × ${item.price} ₽ = ${item.quantity * item.price} ₽`
         ).join('\n');
