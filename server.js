@@ -104,7 +104,7 @@ const transporter = nodemailer.createTransport({
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
     },
-    family: 4  
+    family: 4
 });
 
 transporter.verify((error, success) => {
@@ -195,21 +195,20 @@ app.post('/api/auth/register', async (req, res) => {
             JWT_REFRESH_SECRET,
             { expiresIn: '30d' }
         );
-        
-        // Устанавливаем httpOnly куки
+
         res.cookie('token', token, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'strict',
-            maxAge: 15 * 60 * 1000 // 15 минут
+            maxAge: 15 * 60 * 1000
         });
         res.cookie('refreshToken', refreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'strict',
-            maxAge: 30 * 24 * 60 * 60 * 1000 // 30 дней
+            maxAge: 30 * 24 * 60 * 60 * 1000
         });
-        
+
         res.status(201).json({ customer });
     } catch (err) {
         if (err.code === '23505') {
@@ -230,7 +229,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
     try {
         const result = await pool.query(
-            'SELECT * FROM customers WHERE email = $1', 
+            'SELECT * FROM customers WHERE email = $1',
             [email.toLowerCase()]
         );
         const customer = result.rows[0];
@@ -251,8 +250,7 @@ app.post('/api/auth/login', async (req, res) => {
             JWT_REFRESH_SECRET,
             { expiresIn: '30d' }
         );
-        
-        // Устанавливаем httpOnly куки
+
         res.cookie('token', token, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
@@ -265,7 +263,7 @@ app.post('/api/auth/login', async (req, res) => {
             sameSite: 'strict',
             maxAge: 30 * 24 * 60 * 60 * 1000
         });
-        
+
         res.json({
             customer: {
                 id: customer.id,
@@ -293,14 +291,14 @@ app.post('/api/auth/refresh', async (req, res) => {
             JWT_SECRET,
             { expiresIn: '15m' }
         );
-        
+
         res.cookie('token', newToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'strict',
             maxAge: 15 * 60 * 1000
         });
-        
+
         res.json({ success: true });
     } catch {
         res.status(401).json({ error: 'Refresh токен недействителен' });
@@ -349,7 +347,7 @@ app.patch('/api/customer/me', authMiddleware, async (req, res) => {
     }
 });
 
-// ─── ЗАКАЗЫ (С УМЕНЬШЕНИЕМ stock) ────────────────────────────────────────────
+// ─── ЗАКАЗЫ ───────────────────────────────────────────────────────────────────
 
 app.get('/api/customer/orders', authMiddleware, async (req, res) => {
     try {
@@ -387,16 +385,16 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
                 'SELECT stock FROM products WHERE id = $1',
                 [item.product_id]
             );
-            
+
             if (productResult.rows.length === 0) {
                 throw new Error(`Товар с id ${item.product_id} не найден`);
             }
-            
+
             const currentStock = productResult.rows[0].stock;
             if (currentStock < item.quantity) {
                 throw new Error(`Недостаточно товара "${item.name}". В наличии: ${currentStock} шт.`);
             }
-            
+
             await client.query(
                 'UPDATE products SET stock = stock - $1 WHERE id = $2',
                 [item.quantity, item.product_id]
@@ -430,18 +428,7 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
                 from: `"Power Store" <${process.env.EMAIL_USER}>`,
                 to: req.user.email,
                 subject: `Заказ №${order.id} оформлен — Power Store`,
-                text: `Здравствуйте!
-
-Ваш заказ №${order.id} успешно оформлен.
-
-Состав заказа:
-${itemsList}
-
-Итого: ${total_amount} ₽
-
-С вами свяжутся для подтверждения заказа и уточнения деталей доставки.
-
-Спасибо что выбрали Power Store!`
+                text: `Здравствуйте!\n\nВаш заказ №${order.id} успешно оформлен.\n\nСостав заказа:\n${itemsList}\n\nИтого: ${total_amount} ₽\n\nС вами свяжутся для подтверждения заказа и уточнения деталей доставки.\n\nСпасибо что выбрали Power Store!`
             });
             console.log('Письмо отправлено!');
         } catch (mailErr) {
@@ -549,11 +536,11 @@ app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) =>
 app.patch('/api/admin/users/:id/toggle-admin', authMiddleware, adminMiddleware, async (req, res) => {
     const { id } = req.params;
     const { is_admin } = req.body;
-    
+
     if (parseInt(id) === req.user.id && is_admin === false) {
         return res.status(400).json({ error: 'Нельзя снять права администратора с самого себя' });
     }
-    
+
     try {
         const result = await pool.query(
             'UPDATE customers SET is_admin = $1 WHERE id = $2 RETURNING id, full_name, email, is_admin',
@@ -572,12 +559,12 @@ app.patch('/api/admin/users/:id/toggle-admin', authMiddleware, adminMiddleware, 
 app.get('/api/admin/orders', authMiddleware, adminMiddleware, async (req, res) => {
     try {
         const result = await pool.query(`
-            SELECT o.*, c.full_name, c.email 
+            SELECT o.*, c.full_name, c.email
             FROM orders o
             JOIN customers c ON o.customer_id = c.id
             ORDER BY o.order_date DESC
         `);
-        
+
         const orders = await Promise.all(result.rows.map(async (order) => {
             const itemsResult = await pool.query(
                 `SELECT * FROM order_items WHERE order_id = $1`,
@@ -585,7 +572,7 @@ app.get('/api/admin/orders', authMiddleware, adminMiddleware, async (req, res) =
             );
             return { ...order, items: itemsResult.rows };
         }));
-        
+
         res.json(orders);
     } catch (err) {
         console.error('Ошибка получения заказов:', err);
@@ -593,27 +580,76 @@ app.get('/api/admin/orders', authMiddleware, adminMiddleware, async (req, res) =
     }
 });
 
+// ── POST: добавить товар ──────────────────────────────────────────────────────
 app.post('/api/admin/products', authMiddleware, adminMiddleware, async (req, res) => {
-    const { name, model, price, type, brand, in_stock } = req.body;
-    
+    const { name, model, price, type_size, brand, in_stock } = req.body; // ← type_size
+
     if (!name || !price) {
         return res.status(400).json({ error: 'Название и цена обязательны' });
     }
-    
+
+    const priceValue = parseFloat(price);
+    const stockValue = parseInt(in_stock) || 0;
+
+    if (isNaN(priceValue) || priceValue < 0) {
+        return res.status(400).json({ error: 'Некорректная цена' });
+    }
+
     try {
         const result = await pool.query(
-            `INSERT INTO products (name, model, price, type, brand, stock)
+            `INSERT INTO products (name, model, price, type_size, brand, stock)
              VALUES ($1, $2, $3, $4, $5, $6)
              RETURNING *`,
-            [name, model || null, price, type || null, brand || null, in_stock || 0]
+            [name, model || null, priceValue, type_size || null, brand || null, stockValue] // ← type_size
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
         console.error('Ошибка добавления товара:', err);
-        res.status(500).json({ error: 'Ошибка сервера' });
+        res.status(500).json({ error: err.message });
     }
 });
 
+// ── PUT: обновить товар ───────────────────────────────────────────────────────
+app.put('/api/admin/products/:id', authMiddleware, adminMiddleware, async (req, res) => {
+    const { id } = req.params;
+    const { name, model, price, type_size, brand, in_stock } = req.body; // ← type_size
+
+    const priceValue = parseFloat(price);
+    const stockValue = parseInt(in_stock);
+
+    if (isNaN(priceValue) || priceValue < 0) {
+        return res.status(400).json({ error: 'Некорректная цена' });
+    }
+    if (isNaN(stockValue) || stockValue < 0) {
+        return res.status(400).json({ error: 'Некорректное количество на складе' });
+    }
+
+    try {
+        const result = await pool.query(
+            `UPDATE products
+             SET name      = $1,
+                 model     = NULLIF($2, ''),
+                 price     = $3,
+                 type_size = NULLIF($4, ''),
+                 brand     = NULLIF($5, ''),
+                 stock     = $6
+             WHERE id = $7
+             RETURNING *`,
+            [name, model || '', priceValue, type_size || '', brand || '', stockValue, id] // ← type_size
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Товар не найден' });
+        }
+
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('Ошибка обновления товара:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── DELETE: удалить товар ─────────────────────────────────────────────────────
 app.delete('/api/admin/products/:id', authMiddleware, adminMiddleware, async (req, res) => {
     const { id } = req.params;
     try {
@@ -628,6 +664,7 @@ app.delete('/api/admin/products/:id', authMiddleware, adminMiddleware, async (re
     }
 });
 
+// ── GET: все товары для админа ────────────────────────────────────────────────
 app.get('/api/admin/products', authMiddleware, adminMiddleware, async (req, res) => {
     try {
         const result = await pool.query(`
@@ -644,35 +681,6 @@ app.get('/api/admin/products', authMiddleware, adminMiddleware, async (req, res)
     } catch (err) {
         console.error('Ошибка получения товаров:', err);
         res.status(500).json({ error: 'Ошибка сервера' });
-    }
-});
-
-app.put('/api/admin/products/:id', authMiddleware, adminMiddleware, async (req, res) => {
-    const { id } = req.params;
-    const { name, model, price, type, brand, in_stock } = req.body;
-    
-    try {
-        const result = await pool.query(
-            `UPDATE products 
-             SET name = COALESCE($1, name),
-                 model = COALESCE($2, model),
-                 price = COALESCE($3, price),
-                 type = COALESCE($4, type),
-                 brand = COALESCE($5, brand),
-                 stock = COALESCE($6, stock)
-             WHERE id = $7
-             RETURNING *`,
-            [name, model, price, type, brand, in_stock, id]
-        );
-        
-        if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'Товар не найден' });
-        }
-        
-        res.json(result.rows[0]);
-    } catch (err) {
-        console.error('Ошибка обновления товара:', err);
-        res.status(500).json({ error: err.message });
     }
 });
 
