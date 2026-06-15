@@ -602,7 +602,7 @@ app.post('/api/admin/products', authMiddleware, adminMiddleware, async (req, res
     
     try {
         const result = await pool.query(
-            `INSERT INTO products (name, model, price, type, brand, in_stock)
+            `INSERT INTO products (name, model, price, type, brand, stock)
              VALUES ($1, $2, $3, $4, $5, $6)
              RETURNING *`,
             [name, model || null, price, type || null, brand || null, in_stock || 0]
@@ -659,7 +659,7 @@ app.put('/api/admin/products/:id', authMiddleware, adminMiddleware, async (req, 
                  price = COALESCE($3, price),
                  type = COALESCE($4, type),
                  brand = COALESCE($5, brand),
-                 in_stock = COALESCE($6, in_stock)
+                 stock = COALESCE($6, stock)
              WHERE id = $7
              RETURNING *`,
             [name, model, price, type, brand, in_stock, id]
