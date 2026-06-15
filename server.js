@@ -672,7 +672,7 @@ app.put('/api/admin/products/:id', authMiddleware, adminMiddleware, async (req, 
         res.json(result.rows[0]);
     } catch (err) {
         console.error('Ошибка обновления товара:', err);
-        res.status(500).json({ error: 'Ошибка сервера' });
+        res.status(500).json({ error: err.message });
     }
 });
 
